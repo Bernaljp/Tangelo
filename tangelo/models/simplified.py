@@ -22,71 +22,68 @@ from ..data.utils import get_cdf
 
 class SimplifiedVelocityModel(nn.Module):
     """
-    Simplified velocity model for population-level RNA dynamics.
+    Simplified velocity model for batch-level RNA dynamics.
     
-    State vector: y = [u, s, c_open] for all cells
+    State vector: y = [u, s, c_open] for all cells in batch
     ODE system: 
-        du/dt = c * W @ sigmoid(s) - beta * u + interaction
+        du/dt = c_open * (W @ sigmoid(s)) - beta * u + interaction
         ds/dt = beta * u - gamma * s  
         dc_open/dt = 0 (chromatin accessibility remains constant)
     
+    Following the pattern from the provided torchode example where all batch 
+    cells are simulated together since they share the same ODE parameters.
+    
     Args:
         num_genes: Number of genes.
-        num_cells: Number of cells in the population.
         sigmoid_function: Pre-trained sigmoid module.
-        W: Gene interaction weight matrix.
-        interaction: Interaction terms.
-        beta: Beta parameters.
-        gamma: Gamma parameters.
-        c: Scaling parameter for chromatin influence.
+        W: Gene interaction weight matrix (shared across batch).
+        interaction: Batch-specific interaction terms.
+        beta: Batch-specific beta parameters.
+        gamma: Batch-specific gamma parameters.
     """
     
     def __init__(
         self,
         num_genes: int,
-        num_cells: int,
         sigmoid_function: SigmoidFeatureModule,
         W: torch.Tensor,
         interaction: torch.Tensor,
         beta: torch.Tensor,
-        gamma: torch.Tensor,
-        c: torch.Tensor
+        gamma: torch.Tensor
     ) -> None:
         super().__init__()
         self.num_genes = num_genes
-        self.num_cells = num_cells
         self.sigmoid = sigmoid_function
-        self.W = W  # Shape: (num_genes, num_genes)
-        self.interaction = interaction  # Shape: (num_cells, num_genes)
-        self.beta = beta  # Shape: (num_cells, num_genes)
-        self.gamma = gamma  # Shape: (num_cells, num_genes)
-        self.c = c  # Shape: (num_cells, num_genes)
+        self.W = W  # Shape: (num_genes, num_genes) - shared across batch
+        self.interaction = interaction  # Shape: (batch_size, num_genes)
+        self.beta = beta  # Shape: (batch_size, num_genes)
+        self.gamma = gamma  # Shape: (batch_size, num_genes)
 
     def forward(self, t: Union[float, torch.Tensor], y: torch.Tensor) -> torch.Tensor:
         """
-        Computes the velocity vector dy/dt for population-level dynamics.
+        Computes the velocity vector dy/dt for batch dynamics.
 
         Args:
             t: Current time (often unused in autonomous systems).
-            y: State tensor of shape (num_cells, 3*num_genes) 
-               representing [u, s, c_open] for all cells.
+            y: State tensor of shape (batch_size, 3*num_genes) 
+               representing [u, s, c_open] for all cells in batch.
 
         Returns:
             The velocity vector dy/dt with same shape as y.
         """
-        # Reshape state: y is (num_cells, 3*num_genes)
-        u = y[:, :self.num_genes]  # (num_cells, num_genes)
-        s = y[:, self.num_genes:2*self.num_genes]  # (num_cells, num_genes)
-        c_open = y[:, 2*self.num_genes:]  # (num_cells, num_genes)
+        # Reshape state: y is (batch_size, 3*num_genes)
+        u = y[:, :self.num_genes]  # (batch_size, num_genes)
+        s = y[:, self.num_genes:2*self.num_genes]  # (batch_size, num_genes)
+        c_open = y[:, 2*self.num_genes:]  # (batch_size, num_genes)
         
         # Apply sigmoid to spliced counts
-        sigma = self.sigmoid(s)  # (num_cells, num_genes)
+        sigma = self.sigmoid(s)  # (batch_size, num_genes)
         
-        # Gene interaction: W @ sigma.T -> (num_genes, num_cells) -> transpose -> (num_cells, num_genes)
-        W_sigma = torch.matmul(sigma, self.W.T)  # (num_cells, num_genes)
+        # Gene interaction: sigma @ W.T -> (batch_size, num_genes)
+        W_sigma = torch.matmul(sigma, self.W.T)  # (batch_size, num_genes)
         
-        # Velocity equations
-        du_dt = self.c * c_open * W_sigma - self.beta * u + self.interaction
+        # Velocity equations (c_open modulates W interaction, no separate c parameter)
+        du_dt = c_open * W_sigma - self.beta * u + self.interaction
         ds_dt = self.beta * u - self.gamma * s
         dc_open_dt = torch.zeros_like(c_open)  # Chromatin accessibility is constant
     
@@ -171,10 +168,6 @@ class SimplifiedTangeloModel(nn.Module):
             latent_dim, hidden_dim_decoder, gene_dim, mlp_layers, 
             activation_fn, batch_norm, dropout, residual
         )
-        self.c_decoder = MLP(
-            latent_dim, hidden_dim_decoder, gene_dim, mlp_layers, 
-            activation_fn, batch_norm, dropout, residual
-        )
 
         # Single shared W matrix (not a mixture anymore)
         self.W = nn.Parameter(torch.randn(gene_dim, gene_dim) * 0.01)
@@ -224,7 +217,6 @@ class SimplifiedTangeloModel(nn.Module):
         gamma = F.softplus(self.gamma_decoder(z))
         interaction = self.decoder_interaction(z_spatial)
         t = F.softplus(self.time_encoder(z))
-        c = F.softplus(self.c_decoder(z))
 
         # Zero initial conditions for now
         batch_size = x.shape[0]
@@ -232,8 +224,8 @@ class SimplifiedTangeloModel(nn.Module):
         # Set c_open in initial conditions
         x0[:, 2*self.gene_dim:] = c_open
 
-        # Simulate population-level ODE
-        pred_u, pred_s = self.simulate(t, x0, interaction, beta, gamma, c, batch_size)
+        # Simulate batch-level ODE
+        pred_u, pred_s = self.simulate(t, x0, interaction, beta, gamma, batch_size)
 
         return pred_u, pred_s, qz_mean, qz_log_var
     
@@ -296,11 +288,10 @@ class SimplifiedTangeloModel(nn.Module):
         interaction: torch.Tensor,
         beta: torch.Tensor,
         gamma: torch.Tensor,
-        c: torch.Tensor,
         batch_size: int
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Population-level ODE simulation using torchode.
+        Batch-level ODE simulation using torchode, following the provided example pattern.
         
         Args:
             t: Time points for each cell.
@@ -308,37 +299,63 @@ class SimplifiedTangeloModel(nn.Module):
             interaction: Interaction terms.
             beta: Beta parameters.
             gamma: Gamma parameters.
-            c: Scaling parameters.
             batch_size: Number of cells.
             
         Returns:
             Tuple of (pred_u, pred_s).
         """
-        # Create velocity model for the population
+        # Create velocity model for the batch
         velocity_model = SimplifiedVelocityModel(
-            self.gene_dim, batch_size, self.sigmoid_function,
-            self.W, interaction, beta, gamma, c
+            self.gene_dim, self.sigmoid_function,
+            self.W, interaction, beta, gamma
         )
 
-        # Set up ODE solver
+        # Set up ODE solver following the provided example
         term = to.ODETerm(velocity_model)
         step_method = to.Dopri5(term=term)
         step_size_controller = to.FixedStepController()
         solver = to.AutoDiffAdjoint(step_method, step_size_controller)
 
-        # Use maximum time across all cells for simulation
-        t_max = t.max()
-        t_span = torch.tensor([0.0, t_max.item()], device=x0.device)
-        
-        # Create IVP and solve
-        ivp = to.InitialValueProblem(y0=x0, t_start=t_span[0], t_end=t_span[1])
-        sol = solver.solve(ivp, dt0=self.dt0)
-        
-        # Extract final state
-        final_state = sol.ys[-1]  # Shape: (batch_size, 3*gene_dim)
-        
-        pred_u = final_state[:, :self.gene_dim]
-        pred_s = final_state[:, self.gene_dim:2*self.gene_dim]
+        # Following the pattern from the example: handle batch simulation
+        if t.shape[0] > 1:
+            # Multiple time points - use the pattern from the example
+            _, index = torch.sort(t, dim=0)
+            dim = t.shape[0] * t.shape[1] if t.dim() > 1 else t.shape[0]
+            
+            # Create time evaluation points
+            t0 = torch.zeros((batch_size, 1), device=x0.device)
+            dt0 = self.dt0.expand(dim)
+            
+            t_eval = t.reshape(-1, 1) if t.dim() > 1 else t.unsqueeze(1)
+            t_eval = torch.cat((t0, t_eval), dim=1)
+            
+            # Create IVP and solve
+            ivp = to.InitialValueProblem(y0=x0, t_eval=t_eval)
+            sol = solver.solve(ivp, dt0=dt0)
+            
+            # Extract results following the example pattern
+            pre_u = sol.ys[:, 1:, :self.gene_dim]
+            pre_s = sol.ys[:, 1:, self.gene_dim:2*self.gene_dim]
+            
+            if t.shape[1] > 1:
+                pred_u = pre_u.reshape(-1, t.shape[1])
+                pred_s = pre_s.reshape(-1, t.shape[1])
+            else:
+                pred_u = pre_u.ravel()
+                pred_s = pre_s.ravel()
+        else:
+            # Single time point case
+            t0 = torch.zeros((batch_size, 1), device=x0.device)
+            t_eval = torch.cat((t0, t.unsqueeze(1)), dim=1)
+            
+            # Create IVP and solve
+            ivp = to.InitialValueProblem(y0=x0, t_eval=t_eval)
+            sol = solver.solve(ivp, dt0=self.dt0)
+            
+            # Extract final state
+            final_state = sol.ys[:, -1]  # Shape: (batch_size, 3*gene_dim)
+            pred_u = final_state[:, :self.gene_dim]
+            pred_s = final_state[:, self.gene_dim:2*self.gene_dim]
         
         return pred_u, pred_s
     
