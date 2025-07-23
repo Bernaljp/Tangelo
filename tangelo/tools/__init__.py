@@ -1,10 +1,10 @@
-"""Tools and utilities for Tangelo."""
+"""Analysis tools and utilities for Tangelo."""
 
-# Import utility functions
-from ..data import (
-    create_graph_data,
-    get_cdf,
-)
+# Import graph construction tools
+from ..data.preprocessing import create_graph_data
+from ..data.utils import get_cdf
+
+# Import model utilities
 from ..models.base import (
     SigmoidFeatureModule,
     SigmoidFeatureTrainer,

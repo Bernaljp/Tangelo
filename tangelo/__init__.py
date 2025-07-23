@@ -34,10 +34,13 @@ from .config import TangeloConfig, load_config, save_config
 # Keep some compatibility imports for existing code
 from .data import (
     create_peak_by_cell_matrix,
+    setup_multimodal_data,
+)
+from .tools import (
     create_graph_data,
     get_cdf,
 )
-from .visualization import (
+from .plot import (
     plot_umap_components_and_rgb,
     plot_spatial_gene_expression,
     create_umap_embedding,
@@ -64,10 +67,13 @@ __all__ = [
     "TangeloConfig",
     "load_config",
     "save_config",
-    # Legacy compatibility
+    # Legacy compatibility - data functions
     "create_peak_by_cell_matrix",
+    "setup_multimodal_data",
+    # Legacy compatibility - tools functions  
     "create_graph_data", 
     "get_cdf",
+    # Legacy compatibility - plot functions
     "plot_umap_components_and_rgb",
     "plot_spatial_gene_expression",
     "create_umap_embedding",
