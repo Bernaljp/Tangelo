@@ -17,6 +17,7 @@ import scipy as scp
 
 from .base import MLP, SigmoidFeatureModule, SigmoidFeatureTrainer
 from .encoder import GraphVAEncoder
+from .batch_velocity import VelocityEncoder, BatchODESolver
 from ..data.utils import get_cdf
 
 
@@ -175,6 +176,16 @@ class SimplifiedTangeloModel(nn.Module):
         # Pre-trained sigmoid function
         self.sigmoid_function = SigmoidFeatureModule(gene_dim)
         
+        # Batch velocity encoder following VELOVI pattern
+        self.velocity_encoder = VelocityEncoder(
+            gene_dim, self.sigmoid_function, self.W
+        )
+        
+        # ODE solver for batch processing
+        self.ode_solver = BatchODESolver(
+            self.velocity_encoder, gene_dim, dt0=torch.ones(1)
+        )
+        
         # Scale parameters for likelihood
         self.scale_unconstrained = nn.Parameter(-1.0 * torch.ones(2 * gene_dim))
         
@@ -291,73 +302,31 @@ class SimplifiedTangeloModel(nn.Module):
         batch_size: int
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Batch-level ODE simulation using torchode, following the provided example pattern.
+        Batch-level ODE simulation using VELOVI pattern with shared velocity encoder.
+        
+        KEY CHANGE: Following VELOVI pattern, beta and gamma must be shared across
+        the entire batch for the ODE solver to work correctly. Only interaction
+        can be cell-specific.
         
         Args:
-            t: Time points for each cell.
-            x0: Initial conditions [u0, s0, c_open].
-            interaction: Interaction terms.
-            beta: Beta parameters.
-            gamma: Gamma parameters.
+            t: Time points for each cell (batch_size,).
+            x0: Initial conditions [u0, s0, c_open] (batch_size, 3*gene_dim).
+            interaction: Cell-specific interaction terms (batch_size, gene_dim).
+            beta: Shared beta parameters (gene_dim,) - SAME for all cells.
+            gamma: Shared gamma parameters (gene_dim,) - SAME for all cells.
             batch_size: Number of cells.
             
         Returns:
             Tuple of (pred_u, pred_s).
         """
-        # Create velocity model for the batch
-        velocity_model = SimplifiedVelocityModel(
-            self.gene_dim, self.sigmoid_function,
-            self.W, interaction, beta, gamma
-        )
-
-        # Set up ODE solver following the provided example
-        term = to.ODETerm(velocity_model)
-        step_method = to.Dopri5(term=term)
-        step_size_controller = to.FixedStepController()
-        solver = to.AutoDiffAdjoint(step_method, step_size_controller)
-
-        # Following the pattern from the example: handle batch simulation
-        if t.shape[0] > 1:
-            # Multiple time points - use the pattern from the example
-            _, index = torch.sort(t, dim=0)
-            dim = t.shape[0] * t.shape[1] if t.dim() > 1 else t.shape[0]
-            
-            # Create time evaluation points
-            t0 = torch.zeros((batch_size, 1), device=x0.device)
-            dt0 = self.dt0.expand(dim)
-            
-            t_eval = t.reshape(-1, 1) if t.dim() > 1 else t.unsqueeze(1)
-            t_eval = torch.cat((t0, t_eval), dim=1)
-            
-            # Create IVP and solve
-            ivp = to.InitialValueProblem(y0=x0, t_eval=t_eval)
-            sol = solver.solve(ivp, dt0=dt0)
-            
-            # Extract results following the example pattern
-            pre_u = sol.ys[:, 1:, :self.gene_dim]
-            pre_s = sol.ys[:, 1:, self.gene_dim:2*self.gene_dim]
-            
-            if t.shape[1] > 1:
-                pred_u = pre_u.reshape(-1, t.shape[1])
-                pred_s = pre_s.reshape(-1, t.shape[1])
-            else:
-                pred_u = pre_u.ravel()
-                pred_s = pre_s.ravel()
-        else:
-            # Single time point case
-            t0 = torch.zeros((batch_size, 1), device=x0.device)
-            t_eval = torch.cat((t0, t.unsqueeze(1)), dim=1)
-            
-            # Create IVP and solve
-            ivp = to.InitialValueProblem(y0=x0, t_eval=t_eval)
-            sol = solver.solve(ivp, dt0=self.dt0)
-            
-            # Extract final state
-            final_state = sol.ys[:, -1]  # Shape: (batch_size, 3*gene_dim)
-            pred_u = final_state[:, :self.gene_dim]
-            pred_s = final_state[:, self.gene_dim:2*self.gene_dim]
+        # Following VELOVI pattern: use shared velocity encoder with batch solver
+        # beta and gamma are now shared across the batch (not per-cell)
+        shared_beta = beta.mean(dim=0) if beta.dim() > 1 else beta
+        shared_gamma = gamma.mean(dim=0) if gamma.dim() > 1 else gamma
         
-        return pred_u, pred_s
+        return self.ode_solver.solve_batch(
+            t, x0, interaction, shared_beta, shared_gamma
+        )
     
     def pretrain_sigmoid(
         self,
