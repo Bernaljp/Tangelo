@@ -20,25 +20,28 @@ from .models import (
     VelocityModel,
 )
 
-# Data processing utilities
+# Modular imports following scanpy-style organization
+from . import data
+from . import plot  
+from . import pp
+from . import tools
+
+# Convenient top-level access to key functions
+from .data import setup_multimodal_data
+from .training import TangeloTrainer
+from .config import TangeloConfig, load_config, save_config
+
+# Keep some compatibility imports for existing code
 from .data import (
     create_peak_by_cell_matrix,
-    setup_multimodal_data,
     create_graph_data,
     get_cdf,
 )
-
-# Training utilities
-from .training import TangeloTrainer
-
-# Configuration management
-from .config import TangeloConfig, load_config, save_config
-
-# Visualization utilities
 from .visualization import (
     plot_umap_components_and_rgb,
     plot_spatial_gene_expression,
     create_umap_embedding,
+    create_rgb_colors,
 )
 
 __all__ = [
@@ -50,19 +53,23 @@ __all__ = [
     "SigmoidFeatureModule",
     "SigmoidFeatureTrainer",
     "VelocityModel",
-    # Data processing
-    "create_peak_by_cell_matrix",
+    # Modular access
+    "data",
+    "plot",
+    "pp", 
+    "tools",
+    # Top-level functions (for compatibility)
     "setup_multimodal_data",
-    "create_graph_data", 
-    "get_cdf",
-    # Training
     "TangeloTrainer",
-    # Configuration
     "TangeloConfig",
     "load_config",
     "save_config",
-    # Visualization
+    # Legacy compatibility
+    "create_peak_by_cell_matrix",
+    "create_graph_data", 
+    "get_cdf",
     "plot_umap_components_and_rgb",
     "plot_spatial_gene_expression",
     "create_umap_embedding",
+    "create_rgb_colors",
 ]
