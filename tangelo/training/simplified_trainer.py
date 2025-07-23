@@ -116,6 +116,7 @@ class SimplifiedTangeloTrainer:
         num_neighbors: List[int] = [10, 5],
         n_neighbors_spatial: int = 8,
         n_neighbors_expression: int = 30,
+        knn_use_unspliced: bool = False,
         sigmoid_epochs: int = 1000,
         sigmoid_lr: float = 1.0
     ) -> List[float]:

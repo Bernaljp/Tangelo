@@ -119,10 +119,7 @@ class TangeloTrainer:
         """
         # Pre-train sigmoid function
         print("Pre-training sigmoid function...")
-        if knn_use_unspliced:
-            s_data = adata['rna'].layers['M_u'].toarray().astype(np.float32)
-        else:
-            s_data = adata['rna'].layers['M_s'].toarray().astype(np.float32)
+        s_data = adata['rna'].layers['M_s'].toarray().astype(np.float32)
         
         s_tensor = torch.tensor(s_data, device=self.device)
         self.model.pretrain_sigmoid(s_tensor, sigmoid_epochs, sigmoid_lr)
