@@ -127,10 +127,9 @@ def plot_spatial_gene_expression(
     plt.colorbar(im1, ax=axes[0], shrink=0.8)
     
     # Overlay on tissue image
-    if img_path and img_path.exists():
-        img = mpimg.imread(img_path)
-        img = np.fliplr(img)  # Flip to match coordinate system
-        axes[1].imshow(img, alpha=alpha_background, extent=extent)
+    img = mpimg.imread(img_path)
+    img = np.fliplr(img)  # Flip to match coordinate system
+    axes[1].imshow(img, alpha=alpha_background, extent=extent)
     
     im2 = axes[1].imshow(expr_grid, extent=extent, cmap=cmap, alpha=alpha_overlay)
     axes[1].set_title(f'{gene_name} on Tissue')
