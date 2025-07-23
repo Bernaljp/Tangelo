@@ -323,9 +323,10 @@ class SimplifiedTangeloModel(nn.Module):
         # beta and gamma are now shared across the batch (not per-cell)
         shared_beta = beta.mean(dim=0) if beta.dim() > 1 else beta
         shared_gamma = gamma.mean(dim=0) if gamma.dim() > 1 else gamma
+        shared_interaction = interaction.mean(dim=0) if interaction.dim() > 1 else interaction
         
         return self.ode_solver.solve_batch(
-            t, x0, interaction, shared_beta, shared_gamma
+            t, x0, shared_interaction, shared_beta, shared_gamma
         )
     
     def pretrain_sigmoid(
