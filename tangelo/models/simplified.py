@@ -140,7 +140,7 @@ class SimplifiedTangeloModel(nn.Module):
         self.gene_dim = gene_dim
         self.spatial_dim = spatial_dim
         # Simplified input: [u, s, c_open, spatial] (no ATAC peaks)
-        self.input_dim = 3 * gene_dim + spatial_dim
+        self.input_dim = 2 * gene_dim + spatial_dim
         self.latent_dim = latent_dim
         self.n_neighbors = n_neighbors
         self.tangent_loss_kwargs = tangent_loss_kwargs
