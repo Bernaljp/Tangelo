@@ -115,8 +115,7 @@ def setup_multimodal_data(
     data_path: str,
     rna_file: str = "counts_unfiltered/adata.h5ad",
     spatial_file: str = "spatial/tissue_positions_list.csv",
-    atac_path: str = "atac",
-    use_mm10: bool = True
+    atac_path: str = "atac"
 ) -> mu.MuData:
     """
     Sets up multi-modal data combining RNA, ATAC, and spatial information.
@@ -126,16 +125,12 @@ def setup_multimodal_data(
         rna_file: Path to RNA data file relative to data_path.
         spatial_file: Path to spatial coordinates file relative to data_path.
         atac_path: Path to ATAC data directory relative to data_path.
-        use_mm10: Whether to use mm10 reference.
         
     Returns:
         Processed MuData object.
     """
     # Load RNA data
-    if use_mm10:
-        rna_path = data_path.replace("SRR28572641", "SRR28572641_mm10") + rna_file
-    else:
-        rna_path = os.path.join(data_path, rna_file)
+    rna_path = os.path.join(data_path, rna_file)
     
     adata_rna = dyn.read_h5ad(rna_path)
     if 'mature' in adata_rna.layers:

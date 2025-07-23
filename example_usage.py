@@ -20,8 +20,7 @@ def main():
     # 1. Setup multi-modal data (replaces notebook cells 5-17)
     print("Setting up multi-modal data...")
     adata = tg.setup_multimodal_data(
-        data_path=data_path,
-        use_mm10=True
+        data_path=data_path
     )
     
     # Preprocess multi-modal data (replaces notebook preprocessing)
@@ -197,7 +196,7 @@ def small_dataset_example():
     data_path = "/path/to/your/data/SRR28572641/"
     
     # Load full dataset
-    adata = tg.setup_multimodal_data(data_path, use_mm10=True)
+    adata = tg.setup_multimodal_data(data_path)
     
     # Create small subset
     import muon as mu

@@ -35,8 +35,7 @@ def test_simplified_model():
     print("\n📊 Setting up multi-modal data...")
     try:
         adata = tg.setup_multimodal_data(
-            data_path=data_path,
-            use_mm10=True
+            data_path=data_path
         )
         print(f"✅ Data loaded: {adata.n_obs} cells × {adata.n_vars} features")
     except Exception as e:
