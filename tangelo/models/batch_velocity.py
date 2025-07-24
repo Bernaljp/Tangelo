@@ -8,6 +8,7 @@ following the pattern from the provided reference implementation.
 from typing import Tuple, Union
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torchode as to
 
 from .base import SigmoidFeatureModule
@@ -57,8 +58,10 @@ class VelocityEncoder(nn.Module):
             beta: Shared beta parameters (num_genes,).
             gamma: Shared gamma parameters (num_genes,).
         """
-        self.beta = beta
-        self.gamma = gamma
+        # Ensure parameters are on the same device as the model
+        device = next(self.parameters()).device
+        self.beta = beta.to(device)
+        self.gamma = gamma.to(device)
         
     def forward(
         self,
@@ -66,34 +69,35 @@ class VelocityEncoder(nn.Module):
         u: torch.Tensor,
         s: torch.Tensor,
         c_open: torch.Tensor,
-        interaction: torch.Tensor
+        z: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Computes velocity using shared parameters.
+        Computes velocity using stored parameters (VELOVI pattern).
         
         Args:
             t: Time (unused in autonomous system).
             u: Unspliced counts (batch_size, num_genes).
             s: Spliced counts (batch_size, num_genes).
             c_open: Chromatin accessibility (batch_size, num_genes).
-            interaction: Cell-specific interaction terms (batch_size, num_genes).
+            z: Latent representation for computing interactions (batch_size, latent_dim).
             
         Returns:
             Tuple of (du_dt, ds_dt, dc_open_dt).
         """
-        if self.beta is None or self.gamma is None:
-            raise RuntimeError("Must call set_shared_parameters before forward pass")
+        # Get kinetic parameters from stored decoders (VELOVI pattern)
+        beta = torch.clamp(F.softplus(self.beta_mean_unconstr(z)), 0, 50)
+        gamma = torch.clamp(F.softplus(self.gamma_mean_unconstr(z)), 0, 50)
+        interaction = self.interaction_decoder(z)
             
         # Apply sigmoid to spliced counts
         sigma = self.sigmoid(s)  # (batch_size, num_genes)
         
         # Gene interaction using shared W matrix
-        W_sigma = torch.matmul(sigma, self.W.T)  # (batch_size, num_genes)
+        W_sigma = torch.matmul(sigma, self.W_matrix.T)  # (batch_size, num_genes)
         
-        # Velocity equations with shared parameters
-        # Only interaction can be cell-specific, beta/gamma are shared
-        du_dt = c_open * W_sigma - self.beta.unsqueeze(0) * u + interaction
-        ds_dt = self.beta.unsqueeze(0) * u - self.gamma.unsqueeze(0) * s
+        # Velocity equations
+        du_dt = c_open * W_sigma - beta * u + interaction
+        ds_dt = beta * u - gamma * s
         dc_open_dt = torch.zeros_like(c_open)  # Chromatin accessibility constant
     
         return du_dt, ds_dt, dc_open_dt
@@ -122,11 +126,13 @@ class VelocityBatchWrapper(nn.Module):
         self.num_genes = num_genes
         
         # These will be set before each ODE solve
-        self.interaction = None
+        self.z = None
 
-    def set_batch_interaction(self, interaction: torch.Tensor):
-        """Set batch-specific interaction terms."""
-        self.interaction = interaction
+    def set_batch_latent(self, z: torch.Tensor):
+        """Set batch latent representation for computing parameters."""
+        # Ensure latent tensor is on the same device as the model
+        device = next(self.velocity_encoder.parameters()).device
+        self.z = z.to(device)
 
     def forward(self, t: Union[float, torch.Tensor], y: torch.Tensor) -> torch.Tensor:
         """
@@ -143,8 +149,8 @@ class VelocityBatchWrapper(nn.Module):
         Returns:
             Velocity tensor of same shape as y.
         """
-        if self.interaction is None:
-            raise RuntimeError("Must call set_batch_interaction before forward pass")
+        if self.z is None:
+            raise RuntimeError("Must call set_batch_latent before forward pass")
             
         batch_size = y.shape[0]
         
@@ -153,9 +159,9 @@ class VelocityBatchWrapper(nn.Module):
         s = y[:, self.num_genes:2*self.num_genes]  # (batch_size, num_genes)
         c_open = y[:, 2*self.num_genes:]  # (batch_size, num_genes)
         
-        # Compute velocities
+        # Compute velocities using VELOVI pattern
         du_dt, ds_dt, dc_open_dt = self.velocity_encoder(
-            t, u, s, c_open, self.interaction
+            t, u, s, c_open, self.z
         )
         
         # Reshape back to expected format
@@ -187,28 +193,23 @@ class BatchODESolver:
         self,
         t: torch.Tensor,
         x0: torch.Tensor,
-        interaction: torch.Tensor,
-        beta: torch.Tensor,
-        gamma: torch.Tensor
+        z: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Solve ODE for a batch of cells using shared parameters.
+        Solve ODE for a batch of cells using VELOVI pattern.
         
         Args:
             t: Time points for each cell (batch_size, 1) or (batch_size,).
             x0: Initial conditions (batch_size, 3*num_genes).
-            interaction: Cell-specific interactions (batch_size, num_genes).
-            beta: Shared beta parameters (num_genes,).
-            gamma: Shared gamma parameters (num_genes,).
+            z: Latent representation for computing kinetic parameters (batch_size, latent_dim).
             
         Returns:
             Tuple of (pred_u, pred_s).
         """
         batch_size = x0.shape[0]
         
-        # Set shared parameters - KEY: these are the same for all cells
-        self.velocity_encoder.set_shared_parameters(beta, gamma)
-        self.batch_wrapper.set_batch_interaction(interaction)
+        # Set latent representation for parameter computation (VELOVI pattern)
+        self.batch_wrapper.set_batch_latent(z)
         
         # Set up ODE solver
         term = to.ODETerm(self.batch_wrapper)
@@ -225,7 +226,8 @@ class BatchODESolver:
         
         # Create and solve IVP
         ivp = to.InitialValueProblem(y0=x0, t_eval=t_eval)
-        sol = solver.solve(ivp, dt0=self.dt0)
+        dt0_device = self.dt0.to(x0.device)
+        sol = solver.solve(ivp, dt0=dt0_device)
         
         # Extract results - sol.ys has shape (batch_size, time_steps, state_dim)
         final_state = sol.ys[:, -1]  # (batch_size, 3*num_genes)

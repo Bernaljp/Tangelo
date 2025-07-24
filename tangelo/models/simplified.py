@@ -176,10 +176,16 @@ class SimplifiedTangeloModel(nn.Module):
         # Pre-trained sigmoid function
         self.sigmoid_function = SigmoidFeatureModule(gene_dim)
         
-        # Batch velocity encoder following VELOVI pattern
+        # Define velocity encoder following VELOVI pattern
         self.velocity_encoder = VelocityEncoder(
             gene_dim, self.sigmoid_function, self.W
         )
+        
+        # Store kinetic parameters directly in velocity encoder module (VELOVI style)
+        self.velocity_encoder.beta_mean_unconstr = self.beta_decoder
+        self.velocity_encoder.gamma_mean_unconstr = self.gamma_decoder
+        self.velocity_encoder.interaction_decoder = self.decoder_interaction
+        self.velocity_encoder.W_matrix = self.W
         
         # ODE solver for batch processing
         self.ode_solver = BatchODESolver(
@@ -223,10 +229,7 @@ class SimplifiedTangeloModel(nn.Module):
             x, space_edge_index, expression_edge_index
         )
 
-        # Decode per-cell parameters
-        beta = F.softplus(self.beta_decoder(z))
-        gamma = F.softplus(self.gamma_decoder(z))
-        interaction = self.decoder_interaction(z_spatial)
+        # Get time points for simulation
         t = F.softplus(self.time_encoder(z))
 
         # Zero initial conditions for now
@@ -235,8 +238,8 @@ class SimplifiedTangeloModel(nn.Module):
         # Set c_open in initial conditions
         x0[:, 2*self.gene_dim:] = c_open
 
-        # Simulate batch-level ODE
-        pred_u, pred_s = self.simulate(t, x0, interaction, beta, gamma, batch_size)
+        # Simulate batch-level ODE using VELOVI pattern (parameters computed in velocity encoder)
+        pred_u, pred_s = self.simulate(t, x0, z)
 
         return pred_u, pred_s, qz_mean, qz_log_var
     
@@ -296,38 +299,23 @@ class SimplifiedTangeloModel(nn.Module):
         self,
         t: torch.Tensor,
         x0: torch.Tensor,
-        interaction: torch.Tensor,
-        beta: torch.Tensor,
-        gamma: torch.Tensor,
-        batch_size: int
+        z: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Batch-level ODE simulation using VELOVI pattern with shared velocity encoder.
+        Batch-level ODE simulation using VELOVI pattern.
         
-        KEY CHANGE: Following VELOVI pattern, beta and gamma must be shared across
-        the entire batch for the ODE solver to work correctly. Only interaction
-        can be cell-specific.
+        Following VELOVI pattern: kinetic parameters are computed from latent 
+        representation z using the stored decoders in the velocity encoder.
         
         Args:
             t: Time points for each cell (batch_size,).
             x0: Initial conditions [u0, s0, c_open] (batch_size, 3*gene_dim).
-            interaction: Cell-specific interaction terms (batch_size, gene_dim).
-            beta: Shared beta parameters (gene_dim,) - SAME for all cells.
-            gamma: Shared gamma parameters (gene_dim,) - SAME for all cells.
-            batch_size: Number of cells.
+            z: Latent representation (batch_size, latent_dim).
             
         Returns:
             Tuple of (pred_u, pred_s).
         """
-        # Following VELOVI pattern: use shared velocity encoder with batch solver
-        # beta and gamma are now shared across the batch (not per-cell)
-        shared_beta = beta.mean(dim=0) if beta.dim() > 1 else beta
-        shared_gamma = gamma.mean(dim=0) if gamma.dim() > 1 else gamma
-        shared_interaction = interaction.mean(dim=0) if interaction.dim() > 1 else interaction
-        
-        return self.ode_solver.solve_batch(
-            t, x0, shared_interaction, shared_beta, shared_gamma
-        )
+        return self.ode_solver.solve_batch(t, x0, z)
     
     def pretrain_sigmoid(
         self,
