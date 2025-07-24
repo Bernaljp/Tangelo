@@ -12,6 +12,7 @@ __email__ = "your.email@example.com"
 # Core model components
 from .models import (
     TangeloModel,
+    SimplifiedTangeloModel,
     GraphVAEncoder,
     MLP,
     mySAGEConv,
@@ -50,6 +51,7 @@ from .plot import (
 __all__ = [
     # Core models
     "TangeloModel",
+    "SimplifiedTangeloModel",
     "GraphVAEncoder", 
     "MLP",
     "mySAGEConv",

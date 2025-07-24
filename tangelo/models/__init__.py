@@ -10,7 +10,7 @@ from .base import (
 from .encoder import GraphVAEncoder
 from .tangelo import TangeloModel
 from .simplified import SimplifiedTangeloModel, SimplifiedVelocityModel
-from .batch_velocity import VelocityEncoder, VelocityBatchWrapper, BatchODESolver
+from .batch_velocity import VelocityEncoder, VelocityBatchWrapper, BatchODESolver, myVelocityEncoder, myVelocityBatchWrapper
 
 __all__ = [
     "MLP",
@@ -25,4 +25,6 @@ __all__ = [
     "VelocityEncoder",
     "VelocityBatchWrapper", 
     "BatchODESolver",
+    "myVelocityEncoder",
+    "myVelocityBatchWrapper",
 ]
