@@ -159,7 +159,7 @@ class SimplifiedTangeloModel(nn.Module):
         self.batch_velocity.f = self.velocity_encoder(beta, gamma, interaction, c_open_shared)
         # Zero initial conditions for now
         batch_size = x.shape[0]
-        x0 = torch.zeros((2 * self.gene_dim,), device=x.device)
+        x0 = torch.zeros((2 * self.gene_dim,1), device=x.device)
         # Set c_open in initial conditions
 
 
