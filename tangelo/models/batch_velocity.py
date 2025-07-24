@@ -13,6 +13,36 @@ import torchode as to
 from .base import SigmoidFeatureModule
 
 
+class myVelocityEncoder(nn.Module):
+    def __init__(self, num_genes: int):
+        super().__init__()
+        self.num_genes = num_genes
+        self.W = nn.Linear(num_genes, num_genes)
+        
+    def forward(self, beta, gamma, interaction, c_open):
+        def f(sigma, s, u):
+            W_sigma = torch.matmul(sigma, self.W.T)  # (batch_size, num_genes)
+            du_dt = c_open * W_sigma - beta * u + interaction
+            ds_dt = beta * u - gamma * s
+            return torch.cat([du_dt, ds_dt], dim=1)
+        return f
+
+
+class myVelocityBatchWrapper(nn.Module):
+    def __init__(self, num_genes: int):
+        super().__init__()
+        self.num_genes = num_genes
+    
+    def forward(self, t: Union[float, torch.Tensor], y: torch.Tensor) -> torch.Tensor:
+        u = y[:, :self.num_genes]  # (batch_size, num_genes)
+        s = y[:, self.num_genes:2*self.num_genes]  # (batch_size, num_genes)
+        
+        du_dt, ds_dt = self.f(u, s)
+        
+        # Reshape back to expected format
+        return torch.cat([du_dt, ds_dt], dim=1)
+
+
 class VelocityEncoder(nn.Module):
     """
     Shared velocity encoder following VELOVI pattern.
@@ -30,22 +60,21 @@ class VelocityEncoder(nn.Module):
     def __init__(
         self,
         num_genes: int,
-        sigmoid_function: SigmoidFeatureModule,
-        W: torch.Tensor
     ):
         super().__init__()
         self.num_genes = num_genes
-        self.sigmoid = sigmoid_function
-        self.W = W  # Shape: (num_genes, num_genes) - shared across all cells
+        self.W = nn.Linear(num_genes, num_genes)
         
         # These will be set for each batch - must be same for all cells in batch
         self.beta = None  # Shape: (num_genes,) - shared across batch
         self.gamma = None  # Shape: (num_genes,) - shared across batch
+        self.interaction = None
         
     def set_shared_parameters(
         self,
         beta: torch.Tensor,
-        gamma: torch.Tensor
+        gamma: torch.Tensor,
+        interaction: torch.Tensor
     ):
         """
         Set shared parameters for the batch.
@@ -59,14 +88,15 @@ class VelocityEncoder(nn.Module):
         """
         self.beta = beta
         self.gamma = gamma
+        self.interaction = interaction
         
     def forward(
         self,
         t: Union[float, torch.Tensor],
+        sigma: torch.Tensor,
         u: torch.Tensor,
         s: torch.Tensor,
         c_open: torch.Tensor,
-        interaction: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Computes velocity using shared parameters.
@@ -84,19 +114,15 @@ class VelocityEncoder(nn.Module):
         if self.beta is None or self.gamma is None:
             raise RuntimeError("Must call set_shared_parameters before forward pass")
             
-        # Apply sigmoid to spliced counts
-        sigma = self.sigmoid(s)  # (batch_size, num_genes)
-        
         # Gene interaction using shared W matrix
         W_sigma = torch.matmul(sigma, self.W.T)  # (batch_size, num_genes)
         
         # Velocity equations with shared parameters
         # Only interaction can be cell-specific, beta/gamma are shared
-        du_dt = c_open * W_sigma - self.beta.unsqueeze(0) * u + interaction
+        du_dt = c_open * W_sigma - self.beta.unsqueeze(0) * u + self.interaction
         ds_dt = self.beta.unsqueeze(0) * u - self.gamma.unsqueeze(0) * s
-        dc_open_dt = torch.zeros_like(c_open)  # Chromatin accessibility constant
     
-        return du_dt, ds_dt, dc_open_dt
+        return du_dt, ds_dt
 
 
 class VelocityBatchWrapper(nn.Module):
@@ -114,19 +140,10 @@ class VelocityBatchWrapper(nn.Module):
     
     def __init__(
         self,
-        velocity_encoder: VelocityEncoder,
         num_genes: int
     ):
         super().__init__()
-        self.velocity_encoder = velocity_encoder
         self.num_genes = num_genes
-        
-        # These will be set before each ODE solve
-        self.interaction = None
-
-    def set_batch_interaction(self, interaction: torch.Tensor):
-        """Set batch-specific interaction terms."""
-        self.interaction = interaction
 
     def forward(self, t: Union[float, torch.Tensor], y: torch.Tensor) -> torch.Tensor:
         """
@@ -143,10 +160,6 @@ class VelocityBatchWrapper(nn.Module):
         Returns:
             Velocity tensor of same shape as y.
         """
-        if self.interaction is None:
-            raise RuntimeError("Must call set_batch_interaction before forward pass")
-            
-        batch_size = y.shape[0]
         
         # Reshape state: y is (batch_size, 3*num_genes)
         u = y[:, :self.num_genes]  # (batch_size, num_genes)
@@ -154,9 +167,10 @@ class VelocityBatchWrapper(nn.Module):
         c_open = y[:, 2*self.num_genes:]  # (batch_size, num_genes)
         
         # Compute velocities
-        du_dt, ds_dt, dc_open_dt = self.velocity_encoder(
+        du_dt, ds_dt = self.velocity_encoder(
             t, u, s, c_open, self.interaction
         )
+        dc_open_dt = torch.zeros_like(c_open)  # Chromatin accessibility constant
         
         # Reshape back to expected format
         return torch.cat([du_dt, ds_dt, dc_open_dt], dim=1)
@@ -189,7 +203,8 @@ class BatchODESolver:
         x0: torch.Tensor,
         interaction: torch.Tensor,
         beta: torch.Tensor,
-        gamma: torch.Tensor
+        gamma: torch.Tensor,
+        c_open: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Solve ODE for a batch of cells using shared parameters.
@@ -200,7 +215,7 @@ class BatchODESolver:
             interaction: Cell-specific interactions (batch_size, num_genes).
             beta: Shared beta parameters (num_genes,).
             gamma: Shared gamma parameters (num_genes,).
-            
+            c_open: Shared chromatin accessibility parameters (num_genes,).
         Returns:
             Tuple of (pred_u, pred_s).
         """

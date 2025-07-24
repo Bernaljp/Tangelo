@@ -17,78 +17,10 @@ import scipy as scp
 
 from .base import MLP, SigmoidFeatureModule, SigmoidFeatureTrainer
 from .encoder import GraphVAEncoder
-from .batch_velocity import VelocityEncoder, BatchODESolver
+from .batch_velocity import VelocityEncoder, VelocityBatchWrapper, BatchODESolver
+from .batch_velocity import myVelocityEncoder, myVelocityBatchWrapper
 from ..data.utils import get_cdf
 
-
-class SimplifiedVelocityModel(nn.Module):
-    """
-    Simplified velocity model for batch-level RNA dynamics.
-    
-    State vector: y = [u, s, c_open] for all cells in batch
-    ODE system: 
-        du/dt = c_open * (W @ sigmoid(s)) - beta * u + interaction
-        ds/dt = beta * u - gamma * s  
-        dc_open/dt = 0 (chromatin accessibility remains constant)
-    
-    Following the pattern from the provided torchode example where all batch 
-    cells are simulated together since they share the same ODE parameters.
-    
-    Args:
-        num_genes: Number of genes.
-        sigmoid_function: Pre-trained sigmoid module.
-        W: Gene interaction weight matrix (shared across batch).
-        interaction: Batch-specific interaction terms.
-        beta: Batch-specific beta parameters.
-        gamma: Batch-specific gamma parameters.
-    """
-    
-    def __init__(
-        self,
-        num_genes: int,
-        sigmoid_function: SigmoidFeatureModule,
-        W: torch.Tensor,
-        interaction: torch.Tensor,
-        beta: torch.Tensor,
-        gamma: torch.Tensor
-    ) -> None:
-        super().__init__()
-        self.num_genes = num_genes
-        self.sigmoid = sigmoid_function
-        self.W = W  # Shape: (num_genes, num_genes) - shared across batch
-        self.interaction = interaction  # Shape: (batch_size, num_genes)
-        self.beta = beta  # Shape: (batch_size, num_genes)
-        self.gamma = gamma  # Shape: (batch_size, num_genes)
-
-    def forward(self, t: Union[float, torch.Tensor], y: torch.Tensor) -> torch.Tensor:
-        """
-        Computes the velocity vector dy/dt for batch dynamics.
-
-        Args:
-            t: Current time (often unused in autonomous systems).
-            y: State tensor of shape (batch_size, 3*num_genes) 
-               representing [u, s, c_open] for all cells in batch.
-
-        Returns:
-            The velocity vector dy/dt with same shape as y.
-        """
-        # Reshape state: y is (batch_size, 3*num_genes)
-        u = y[:, :self.num_genes]  # (batch_size, num_genes)
-        s = y[:, self.num_genes:2*self.num_genes]  # (batch_size, num_genes)
-        c_open = y[:, 2*self.num_genes:]  # (batch_size, num_genes)
-        
-        # Apply sigmoid to spliced counts
-        sigma = self.sigmoid(s)  # (batch_size, num_genes)
-        
-        # Gene interaction: sigma @ W.T -> (batch_size, num_genes)
-        W_sigma = torch.matmul(sigma, self.W.T)  # (batch_size, num_genes)
-        
-        # Velocity equations (c_open modulates W interaction, no separate c parameter)
-        du_dt = c_open * W_sigma - self.beta * u + self.interaction
-        ds_dt = self.beta * u - self.gamma * s
-        dc_open_dt = torch.zeros_like(c_open)  # Chromatin accessibility is constant
-    
-        return torch.cat([du_dt, ds_dt, dc_open_dt], dim=1)
 
 
 class SimplifiedTangeloModel(nn.Module):
@@ -171,20 +103,15 @@ class SimplifiedTangeloModel(nn.Module):
         )
 
         # Single shared W matrix (not a mixture anymore)
-        self.W = nn.Parameter(torch.randn(gene_dim, gene_dim) * 0.01)
+        self.velocity_encoder = myVelocityEncoder(gene_dim)
+        self.velocity_encoder.W.weight = nn.Parameter(torch.zeros(self.velocity_encoder.W.weight.shape))
         
         # Pre-trained sigmoid function
         self.sigmoid_function = SigmoidFeatureModule(gene_dim)
         
         # Batch velocity encoder following VELOVI pattern
-        self.velocity_encoder = VelocityEncoder(
-            gene_dim, self.sigmoid_function, self.W
-        )
-        
-        # ODE solver for batch processing
-        self.ode_solver = BatchODESolver(
-            self.velocity_encoder, gene_dim, dt0=torch.ones(1)
-        )
+        self.batch_velocity = myVelocityBatchWrapper(gene_dim)
+        # self.batch_velocity.velocity_encoder = self.velocity_encoder
         
         # Scale parameters for likelihood
         self.scale_unconstrained = nn.Parameter(-1.0 * torch.ones(2 * gene_dim))
@@ -224,16 +151,17 @@ class SimplifiedTangeloModel(nn.Module):
         )
 
         # Decode per-cell parameters
-        beta = F.softplus(self.beta_decoder(z))
-        gamma = F.softplus(self.gamma_decoder(z))
-        interaction = self.decoder_interaction(z_spatial)
+        beta = torch.mean(F.softplus(self.beta_decoder(z)), dim=0)
+        gamma = torch.mean(F.softplus(self.gamma_decoder(z)), dim=0)
+        interaction = torch.mean(self.decoder_interaction(z_spatial), dim=0)
+        c_open_shared = (torch.sum(c_open, dim=0)>0).float()
         t = F.softplus(self.time_encoder(z))
-
+        self.batch_velocity.f = self.velocity_encoder(beta, gamma, interaction, c_open_shared)
         # Zero initial conditions for now
         batch_size = x.shape[0]
-        x0 = torch.zeros(batch_size, 3 * self.gene_dim, device=x.device)
+        x0 = torch.zeros((2 * self.gene_dim,), device=x.device)
         # Set c_open in initial conditions
-        x0[:, 2*self.gene_dim:] = c_open
+
 
         # Simulate batch-level ODE
         pred_u, pred_s = self.simulate(t, x0, interaction, beta, gamma, batch_size)
@@ -296,10 +224,6 @@ class SimplifiedTangeloModel(nn.Module):
         self,
         t: torch.Tensor,
         x0: torch.Tensor,
-        interaction: torch.Tensor,
-        beta: torch.Tensor,
-        gamma: torch.Tensor,
-        batch_size: int
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Batch-level ODE simulation using VELOVI pattern with shared velocity encoder.
@@ -319,15 +243,29 @@ class SimplifiedTangeloModel(nn.Module):
         Returns:
             Tuple of (pred_u, pred_s).
         """
-        # Following VELOVI pattern: use shared velocity encoder with batch solver
-        # beta and gamma are now shared across the batch (not per-cell)
-        shared_beta = beta.mean(dim=0) if beta.dim() > 1 else beta
-        shared_gamma = gamma.mean(dim=0) if gamma.dim() > 1 else gamma
-        shared_interaction = interaction.mean(dim=0) if interaction.dim() > 1 else interaction
+        _, index = torch.sort(t, dim=0)
+
+        dim = t.shape[0]
+        t0 = 0
+        dt0 = self.dt0
         
-        return self.ode_solver.solve_batch(
-            t, x0, shared_interaction, shared_beta, shared_gamma
-        )
+        t_eval = t.reshape(-1,1)
+        t_eval = torch.cat((t0,t_eval),dim=1)
+        
+        ## set up G batches, Each G represent a module (a target gene centerred regulon)
+        ## infer the observe gene expression through ODE solver based on x0, t, and velocity_encoder
+        
+        term = to.ODETerm(self.batch_velocity)
+        step_method = to.Dopri5(term=term)
+        #step_size_controller = to.IntegralController(atol=1e-6, rtol=1e-3, term=term)
+        step_size_controller = to.FixedStepController()
+        solver = to.AutoDiffAdjoint(step_method, step_size_controller)
+        #jit_solver = torch.jit.script(solver)
+        sol = solver.solve(to.InitialValueProblem(y0=x0, t_eval=t_eval), dt0 = dt0)
+        pre_u = sol.ys[:,1:,:self.gene_dim]
+        pre_s = sol.ys[:,1:,self.gene_dim:2*self.gene_dim] 
+
+        return pre_u, pre_s
     
     def pretrain_sigmoid(
         self,
