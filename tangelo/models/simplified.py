@@ -246,7 +246,7 @@ class SimplifiedTangeloModel(nn.Module):
         _, index = torch.sort(t, dim=0)
 
         dim = t.shape[0]
-        t0 = 0
+        t0 = torch.zeros((1,), device=t.device)
         dt0 = self.dt0
         
         t_eval = t.reshape(-1,1)
