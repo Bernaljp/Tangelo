@@ -159,7 +159,7 @@ class SimplifiedTangeloModel(nn.Module):
         self.batch_velocity.f = self.velocity_encoder(beta, gamma, interaction, c_open_shared)
         # Zero initial conditions for now
         batch_size = x.shape[0]
-        x0 = torch.zeros((2 * self.gene_dim,1), device=x.device)
+        x0 = torch.zeros((1,2 * self.gene_dim), device=x.device)
         # Set c_open in initial conditions
 
 
@@ -243,14 +243,35 @@ class SimplifiedTangeloModel(nn.Module):
         Returns:
             Tuple of (pred_u, pred_s).
         """
+
+        # x0 = torch.zeros((2 * self.gene_dim,1), device=x.device) #(targets,1)
+        # t0 = torch.zeros((1,1), device=x.device) #(targets,1) (1,1)
+        # dt0 = torch.ones([1], device=x.device) #(1,1)
+
+
+        # t_eval = t.reshape(-1,1) #(batch_size*targets,1) (batch_size,1)
+        # t_eval = torch.cat((t0,t_eval),dim=0) #(batch_size*targets+1,1) (batch_size+1,1)
+        # ## set up G batches, Each G represent a module (a target gene centerred regulon)
+        # ## infer the observe gene expression through ODE solver based on x0, t, and velocity_encoder
+        # #x0 = x0.double()
+
+        # term = to.ODETerm(self.v_encoder)
+        # step_method = to.Dopri5(term=term)
+        # #step_size_controller = to.IntegralController(atol=1e-6, rtol=1e-3, term=term)
+        # step_size_controller = to.FixedStepController()
+        # solver = to.AutoDiffAdjoint(step_method, step_size_controller)
+        # #jit_solver = torch.jit.script(solver)
+        # sol = solver.solve(to.InitialValueProblem(y0=self.x0, t_eval=t_eval), dt0 = self.dt0)
+
+
         _, index = torch.sort(t, dim=0)
 
         dim = t.shape[0]
         t0 = torch.zeros((1,1), device=t.device)
         dt0 = self.dt0
         
-        t_eval = t.reshape(-1,1)
-        t_eval = torch.cat((t0,t_eval),dim=0)
+        t_eval = t.reshape(1,-1)
+        t_eval = torch.cat((t0,t_eval),dim=1)
         
         ## set up G batches, Each G represent a module (a target gene centerred regulon)
         ## infer the observe gene expression through ODE solver based on x0, t, and velocity_encoder
