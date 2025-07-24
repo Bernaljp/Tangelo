@@ -164,7 +164,7 @@ class SimplifiedTangeloModel(nn.Module):
 
 
         # Simulate batch-level ODE
-        pred_u, pred_s = self.simulate(t, x0, interaction, beta, gamma, batch_size)
+        pred_u, pred_s = self.simulate(t, x0)
 
         return pred_u, pred_s, qz_mean, qz_log_var
     
