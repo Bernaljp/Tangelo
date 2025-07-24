@@ -250,7 +250,7 @@ class SimplifiedTangeloModel(nn.Module):
         dt0 = self.dt0
         
         t_eval = t.reshape(-1,1)
-        t_eval = torch.cat((t0,t_eval),dim=1)
+        t_eval = torch.cat((t0,t_eval),dim=0)
         
         ## set up G batches, Each G represent a module (a target gene centerred regulon)
         ## infer the observe gene expression through ODE solver based on x0, t, and velocity_encoder
