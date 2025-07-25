@@ -38,10 +38,10 @@ class myVelocityBatchWrapper(nn.Module):
         u = y[:, :self.num_genes]  # (batch_size, num_genes)
         s = y[:, self.num_genes:2*self.num_genes]  # (batch_size, num_genes)
         
-        du_dt, ds_dt = self.f(self.sigmoid_function(s), s, u)
+        dus_dt = self.f(self.sigmoid_function(s), s, u)
         
         # Reshape back to expected format
-        return torch.cat([du_dt, ds_dt], dim=1)
+        return dus_dt
 
 
 class VelocityEncoder(nn.Module):
