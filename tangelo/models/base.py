@@ -71,7 +71,7 @@ class MLP(nn.Module):
         self.residual = residual
         
         # Input layer
-        self.layers.append(nn.Linear(input_dim, hidden_dim))
+        self.layers.append(nn.Linear(input_dim, hidden_dim, bias=False))
         if bn:
             self.layers.append(nn.BatchNorm1d(hidden_dim))
         self.layers.append(create_activation(activation))

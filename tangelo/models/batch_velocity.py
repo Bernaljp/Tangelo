@@ -17,7 +17,7 @@ class myVelocityEncoder(nn.Module):
     def __init__(self, num_genes: int):
         super().__init__()
         self.num_genes = num_genes
-        self.W = nn.Linear(num_genes, num_genes)
+        self.W = nn.Linear(num_genes, num_genes, bias=False)
         
     def forward(self, beta, gamma, interaction, c_open):
         def f(sigma, s, u):

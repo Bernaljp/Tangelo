@@ -89,6 +89,7 @@ class SimplifiedTangeloModel(nn.Module):
             latent_dim, hidden_dim_decoder, gene_dim, mlp_layers, 
             activation_fn, batch_norm, dropout, residual
         )
+
         self.gamma_decoder = MLP(
             latent_dim, hidden_dim_decoder, gene_dim, mlp_layers, 
             activation_fn, batch_norm, dropout, residual
@@ -121,6 +122,17 @@ class SimplifiedTangeloModel(nn.Module):
             latent_dim, hidden_dim_decoder, n_neighbors, mlp_layers, 
             activation_fn, batch_norm, dropout, residual
         )
+
+        all_nets = [self.beta_decoder, self.gamma_decoder, self.time_encoder, self.decoder_interaction, self.base_decoder, self.graph_va_encoder]
+
+        for net in all_nets:
+            for m in net.modules():
+                if isinstance(m, nn.Linear):
+                    nn.init.normal_(m.weight, mean = 0, std = 0.1)
+                    try:
+                        nn.init.constant_(m.bias, val = 0)
+                    except:
+                        pass
         
         # Buffers for distance matrix and ODE solver
         self.register_buffer('dist_matrix', torch.empty(0))
