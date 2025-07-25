@@ -202,12 +202,12 @@ class SimplifiedTangeloTrainer:
         )
         
         # Forward pass
-        pred_u, pred_s, qz_mean, qz_log_var = self.model(
+        pred_u, pred_s, velocity_knn_base, qz_mean, qz_log_var = self.model(
             batch_input, c_open_batch, batch_space_edge_index, batch.edge_index
         )
         
         # Compute loss
-        loss = self.model.loss(u_batch, s_batch, pred_u, pred_s, qz_mean, qz_log_var, batch.edge_index)
+        loss = self.model.loss(u_batch, s_batch, pred_u, pred_s, velocity_knn_base, qz_mean, qz_log_var, batch.edge_index)
         
         # Backward pass
         loss.backward()

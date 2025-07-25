@@ -154,6 +154,7 @@ class SimplifiedTangeloModel(nn.Module):
         beta = torch.mean(F.softplus(self.beta_decoder(z)), dim=0)
         gamma = torch.mean(F.softplus(self.gamma_decoder(z)), dim=0)
         interaction = torch.mean(self.decoder_interaction(z_spatial), dim=0)
+        velocity_knn_base = self.base_decoder(z)
         c_open_shared = (torch.sum(c_open, dim=0)>0).float()
         t = F.softplus(self.time_encoder(z))
         self.batch_velocity.f = self.velocity_encoder(beta, gamma, interaction, c_open_shared)
@@ -166,7 +167,7 @@ class SimplifiedTangeloModel(nn.Module):
         # Simulate batch-level ODE
         pred_u, pred_s = self.simulate(t, x0)
 
-        return pred_u, pred_s, qz_mean, qz_log_var
+        return pred_u, pred_s, velocity_knn_base, qz_mean, qz_log_var
     
     def loss(
         self,
@@ -174,6 +175,7 @@ class SimplifiedTangeloModel(nn.Module):
         s_true: torch.Tensor,
         pred_u: torch.Tensor,
         pred_s: torch.Tensor,
+        velocity_knn_base: torch.Tensor,
         qz_mean: torch.Tensor,
         qz_log_var: torch.Tensor,
         expression_edge_index: torch.Tensor
@@ -193,8 +195,9 @@ class SimplifiedTangeloModel(nn.Module):
         kl_divergence_z = kl(posterior, prior).sum(dim=1)
 
         # Velocity tangent loss (simplified)
-        base = self.base_decoder(qz_mean)
-        velocity_tangent_loss = self.velocity_tangent_loss(base, expression_edge_index)
+        velocity_tangent_loss = self.velocity_tangent_loss(velocity_knn_base, expression_edge_index)
+
+        print(pred_u.shape, reconstruction_loss.shape, kl_divergence_z.shape, velocity_tangent_loss.shape)
 
         return (reconstruction_loss + kl_divergence_z + velocity_tangent_loss).mean()
     
