@@ -168,7 +168,7 @@ class SimplifiedTangeloModel(nn.Module):
         interaction = torch.mean(self.decoder_interaction(z_spatial), dim=0)
         velocity_knn_base = self.base_decoder(z)
         c_open_shared = (torch.sum(c_open, dim=0)>0).float()
-        t = F.softplus(self.time_encoder(z))
+        t = torch.clamp(F.softplus(self.time_encoder(z)), min=1e-6, max=10)
         self.batch_velocity.f = self.velocity_encoder(beta, gamma, interaction, c_open_shared)
         # Zero initial conditions for now
         batch_size = x.shape[0]
