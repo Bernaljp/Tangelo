@@ -192,15 +192,17 @@ class SimplifiedTangeloModel(nn.Module):
         # KL divergence
         prior = Normal(0, 1)
         posterior = Normal(qz_mean, torch.exp(0.5 * qz_log_var))
-        kl_divergence_z = kl(posterior, prior).sum(dim=1)
+        kl_divergence_z = kl(posterior, prior).sum(dim=0)
 
         # Velocity tangent loss (simplified)
         velocity_tangent_loss = self.velocity_tangent_loss(velocity_knn_base, expression_edge_index)
 
         print(pred_u.shape, reconstruction_loss.shape, kl_divergence_z.shape, velocity_tangent_loss.shape)
+        # torch.Size([1, 295, 500]) torch.Size([1, 500]) torch.Size([295]) torch.Size([])
 
         return (reconstruction_loss + kl_divergence_z + velocity_tangent_loss).mean()
-    
+        
+
     def velocity_tangent_loss(
         self,
         base: torch.Tensor,
@@ -218,6 +220,9 @@ class SimplifiedTangeloModel(nn.Module):
             reg_loss = torch.norm(base, p=2, dim=1).pow(2)
             
             lambda_reg = self.tangent_loss_kwargs.get('lambda_reg', 0.1)
+
+            print('projection_loss', projection_loss.shape)
+            print(dist_matrix_device.shape,base.shape, P_norm.shape, projection_loss.shape, reg_loss.shape)
             return -projection_loss + lambda_reg * reg_loss
             
         except (IndexError, RuntimeError):
