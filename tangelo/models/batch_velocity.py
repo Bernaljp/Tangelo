@@ -21,7 +21,7 @@ class myVelocityEncoder(nn.Module):
         
     def forward(self, beta, gamma, interaction, c_open):
         def f(sigma, s, u):
-            W_sigma = torch.matmul(sigma, self.W.T)  # (batch_size, num_genes)
+            W_sigma = self.W(sigma)  # (batch_size, num_genes)
             du_dt = c_open * W_sigma - beta * u + interaction
             ds_dt = beta * u - gamma * s
             return torch.cat([du_dt, ds_dt], dim=1)
