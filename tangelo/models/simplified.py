@@ -110,7 +110,7 @@ class SimplifiedTangeloModel(nn.Module):
         self.sigmoid_function = SigmoidFeatureModule(gene_dim)
         
         # Batch velocity encoder following VELOVI pattern
-        self.batch_velocity = myVelocityBatchWrapper(gene_dim)
+        self.batch_velocity = myVelocityBatchWrapper(gene_dim, self.sigmoid_function)
         # self.batch_velocity.velocity_encoder = self.velocity_encoder
         
         # Scale parameters for likelihood
@@ -297,11 +297,12 @@ class SimplifiedTangeloModel(nn.Module):
         """Pre-trains the sigmoid function on the data CDF."""
         x_cdf, y_cdf = get_cdf(s)
         
-        model_to_train = SigmoidFeatureModule(self.gene_dim).to(s.device)
+        # model_to_train = SigmoidFeatureModule(self.gene_dim).to(s.device)
+        model_to_train = self.sigmoid_function
         trainer = SigmoidFeatureTrainer(model_to_train, learning_rate=learning_rate)
         trainer.fit(x_cdf.T, y_cdf.T, epochs=n_epochs, verbose=True)
         
-        self.sigmoid_function.set_parameters(model_to_train.get_parameters())
+        # self.sigmoid_function.set_parameters(model_to_train.get_parameters())
         for param in self.sigmoid_function.parameters():
             param.requires_grad = False
         print("Sigmoid pre-training complete.")

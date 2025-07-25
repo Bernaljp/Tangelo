@@ -29,15 +29,16 @@ class myVelocityEncoder(nn.Module):
 
 
 class myVelocityBatchWrapper(nn.Module):
-    def __init__(self, num_genes: int):
+    def __init__(self, num_genes: int, sigmoid_function: SigmoidFeatureModule):
         super().__init__()
         self.num_genes = num_genes
+        self.sigmoid_function = sigmoid_function
     
     def forward(self, t: Union[float, torch.Tensor], y: torch.Tensor) -> torch.Tensor:
         u = y[:, :self.num_genes]  # (batch_size, num_genes)
         s = y[:, self.num_genes:2*self.num_genes]  # (batch_size, num_genes)
         
-        du_dt, ds_dt = self.f(u, s)
+        du_dt, ds_dt = self.f(self.sigmoid_function(s), s, u)
         
         # Reshape back to expected format
         return torch.cat([du_dt, ds_dt], dim=1)
