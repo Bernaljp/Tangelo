@@ -201,20 +201,20 @@ class SimplifiedTangeloModel(nn.Module):
         dist_s = Normal(pred_s, scale[self.gene_dim:])
         recon_loss_u = -dist_u.log_prob(u_true).sum(dim=1)
         recon_loss_s = -dist_s.log_prob(s_true).sum(dim=1)
-        reconstruction_loss = recon_loss_u + recon_loss_s
+        reconstruction_loss = (recon_loss_u + recon_loss_s).mean()
 
         # KL divergence
         prior = Normal(0, 1)
         posterior = Normal(qz_mean, torch.exp(0.5 * qz_log_var))
-        kl_divergence_z = kl(posterior, prior).sum(dim=0)
+        kl_divergence_z = kl(posterior, prior).sum(dim=1).mean()
 
         # Velocity tangent loss (simplified)
         velocity_tangent_loss = self.velocity_tangent_loss(velocity_knn_base, expression_edge_index)
 
-        print(pred_u.shape, reconstruction_loss.shape, kl_divergence_z.shape, velocity_tangent_loss.shape)
+        # print(pred_u.shape, reconstruction_loss.shape, kl_divergence_z.shape, velocity_tangent_loss.shape)
         # torch.Size([1, 295, 500]) torch.Size([1, 500]) torch.Size([295]) torch.Size([])
 
-        return (reconstruction_loss + kl_divergence_z + velocity_tangent_loss).mean()
+        return reconstruction_loss + kl_divergence_z + velocity_tangent_loss
         
 
     def velocity_tangent_loss(
@@ -235,8 +235,8 @@ class SimplifiedTangeloModel(nn.Module):
             
             lambda_reg = self.tangent_loss_kwargs.get('lambda_reg', 0.1)
 
-            print('projection_loss', projection_loss.shape)
-            print(dist_matrix_device.shape,base.shape, P_norm.shape, projection_loss.shape, reg_loss.shape)
+            print('projection_loss')
+            # print(dist_matrix_device.shape,base.shape, P_norm.shape, projection_loss.shape, reg_loss.shape)
             return -projection_loss + lambda_reg * reg_loss
             
         except (IndexError, RuntimeError):
