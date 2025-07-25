@@ -178,6 +178,8 @@ class SimplifiedTangeloModel(nn.Module):
 
         # Simulate batch-level ODE
         pred_u, pred_s = self.simulate(t, x0)
+        pred_u.nan_to_num_(-1)
+        pred_s.nan_to_num_(-1)
 
         return pred_u, pred_s, velocity_knn_base, qz_mean, qz_log_var
     
